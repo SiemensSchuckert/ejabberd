@@ -354,11 +354,20 @@ create_account_key() ->
 store_cert(Key, Chain, CertType, Domains) ->
     DerKey = public_key:der_encode(element(1, Key), Key),
     PemKey = [{element(1, Key), DerKey, not_encrypted}],
-    PemChain = lists:map(
+    PemChain = lists:filtermap(
 		 fun(Cert) ->
-			 DerCert = public_key:pkix_encode(
+			 Issuer = Cert#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.issuer,
+			 IssuerHash = public_key:short_name_hash(Issuer),
+			 IgnoredHash = ca_ignore_hash(),
+			 if
+			    IssuerHash =:= IgnoredHash ->
+				?DEBUG("Ignored cert with issuer hash: ~ts", [IssuerHash]),
+				false;
+			    true ->
+				DerCert = public_key:pkix_encode(
 				     element(1, Cert), Cert, otp),
-			 {'Certificate', DerCert, not_encrypted}
+				{true, {'Certificate', DerCert, not_encrypted}}
+			 end
 		 end, Chain),
     PEM = public_key:pem_encode(PemChain ++ PemKey),
     Path = cert_file(CertType, Domains),
@@ -607,6 +616,9 @@ request_on_start() ->
 
 well_known() ->
     [<<".well-known">>, <<"acme-challenge">>].
+
+ca_ignore_hash() ->
+    string:to_lower(maps:get(ca_ignore, ejabberd_option:acme(), "")).
 
 -spec have_cert_for_domain(binary()) -> boolean().
 have_cert_for_domain(Host) ->
